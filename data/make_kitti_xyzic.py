@@ -1,10 +1,10 @@
 import os
 import numpy as np 
 from PIL import Image
-from get_label import get_kitti_label
+from get_label import get_kitti_label, sort_label
 import cv2
 
-KITTI_DIR = '/home/yifeihu/data/Kitti/object/training'
+KITTI_DIR = '/home/adas/data/Kitti/object/testing'
 color = np.array([[0, 0, 0],
                   [0, 0, 250],
                   [0, 250, 250],
@@ -53,24 +53,25 @@ def make_velodyne_reduce():
         imdata[:, 1] = imdata[:, 1] / imdata[:, 2]
         im = Image.open(imfile)
         width, height = im.size
-        mask = (imdata[:, 0] > 0) & (imdata[:, 0] < width) & (imdata[:, 1] > 0) & (imdata[:, 1] < height)
+        mask = (imdata[:, 0] > 0) & (imdata[:, 0] < width) & (imdata[:, 1] > 0) & (imdata[:, 1] < height) & (data[:, 0] > 0)
         outdata = data[mask, :]
         outdata.tofile(outbinfile)
 
-def get_xyzic(data, label):
+def get_xyzic(data, label, h_offset=1.73):
     if label is None:
         return data
     num, _ = data.shape
     n, _ = label.shape
-    c = np.zeros((num, 1))
+    c = np.zeros((num, 1), dtype=np.float32)
     for i in range(n):
-        obj = label[i]
+        obj = label[i, :]
+        print(obj)
         cls_ , x, y, z, l, w, h, r = obj
         delta_x = data[:, 0] - np.ones(num)*x
         delta_y = data[:, 1] - np.ones(num)*y
-        delta_z = data[:, 2] - np.ones(num)*z
+        delta_z = data[:, 2] - np.ones(num)*z 
         theta = np.arctan2(delta_y, delta_x) - np.ones(num)*r
-        L = np.sqrt(delta_x*delta_x + delta_y*delta_y) * 0.5
+        L = np.sqrt(delta_x*delta_x + delta_y*delta_y)
         delta_w = L * np.sin(theta)
         delta_l = L * np.cos(theta)
         mask = (delta_w > (-w/2)) & (delta_w < (w/2)) & (delta_l > (-l/2)) & (delta_l < (l/2)) & (delta_z > (-h/2)) & (delta_z < (h/2))
@@ -85,23 +86,24 @@ def make_xyzic_image(xyzic, yaw_start=-45, yaw_end=45, v_start=-30, v_end=10, d_
     im_ref = np.zeros((height, width), dtype=np.float32)
     im_height = np.zeros((height, width), dtype=np.float32)
     im_cls = np.zeros((height, width, 3), dtype=np.float32)
+    im_range = np.zeros((height, width), dtype=np.float32)
     x = xyzic[:, 0]
     y = xyzic[:, 1]
     z = xyzic[:, 2]
-    print(x[:10])
-    print(y[:10])
+    L = np.sqrt(x**2 + y**2 + z**2)
     yaw = np.arctan2(y, x)
     v_angel = np.arctan2(z, np.sqrt(x*x + y*y))
-    i = ((yaw_end - yaw) / d_yaw).astype(np.int32)
-    j = ((v_end - v_angel) / d_v).astype(np.int32)
-    print(i[:10])
-    print(j[:10])
+    i = ((yaw_end - yaw*180/np.pi) / d_yaw).astype(np.int32)
+    j = ((v_end - v_angel*180/np.pi) / d_v).astype(np.int32)
+    mask = (i > -1) & (i < width) & (j > -1) & (j < height)
+    i = i[mask]
+    j = j[mask]
+    xyzic = xyzic[mask, :]
     im_ref[j, i] = xyzic[:, 3]
-    im_height[j, i] = z + 1.73
+    im_height[j, i] = xyzic[:, 2] + 1.73
     im_cls[j, i] = color[xyzic[:, 4].astype(np.int32), :]
-    return im_cls, im_ref, im_height
-
-
+    im_range[j, i] = L
+    return im_cls, im_ref, im_height, im_range
 
 
 def make_kitti_xyzic():
@@ -109,25 +111,28 @@ def make_kitti_xyzic():
     bin_xyzic_dir = KITTI_DIR + '/velodyne_xyzic/'
     label_dir = KITTI_DIR + '/label_2/'
     binlist = os.listdir(bin_dir)
-    #for i in range(len(binlist)):
-    for i in range(1):
-        i=0
+    for i in range(len(binlist)):
+    #for i in range(1):
         print(i, binlist[i])
         binfile = binlist[i]  
         labelfile = label_dir + binfile.replace('bin', 'txt')
         rawbinfile = bin_dir + binfile
         outbinfile = bin_xyzic_dir + binfile
         label = get_kitti_label(labelfile, 'velodyne')
+        label = sort_label(label)
         data = np.fromfile(rawbinfile, dtype=np.float32).reshape(-1, 4)
-        data[:, 2] = data[:, 2] + 1.73
+        #data[:, 2] = data[:, 2]
         xyzic = get_xyzic(data, label)
-        im_cls, im_ref, im_height = make_xyzic_image(xyzic)
-        im1 = Image.fromarray(im_cls.astype('uint8')).convert('RGB')
-        im1.show()
-        im2 = Image.fromarray((im_ref*255).astype('uint8')).convert('RGB')
-        im2.show()
-        im3 = Image.fromarray((im_height*255).astype('uint8')).convert('RGB')
-        im3.show()
+        im_cls, im_ref, im_height, im_range = make_xyzic_image(xyzic)
+        # im1 = Image.fromarray(im_cls.astype('uint8')).convert('RGB')
+        # im1.show()
+        # im2 = Image.fromarray((im_ref*255).astype('uint8')).convert('RGB')
+        # im2.show()
+        # im3 = Image.fromarray((im_height*255).astype('uint8')).convert('RGB')
+        # im3.show()
+        # im4 = Image.fromarray((im_range/100*255).astype('uint8')).convert('RGB')
+        # im4.show()
+        xyzic.tofile(outbinfile)
 
 
 def test():
@@ -154,6 +159,6 @@ def test():
     outdata = data[mask, :]
     print(outdata.shape)
 
-make_velodyne_reduce()
+#make_velodyne_reduce()
 #test()
-#make_kitti_xyzic()
+make_kitti_xyzic()

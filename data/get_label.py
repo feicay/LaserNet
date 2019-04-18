@@ -36,8 +36,8 @@ def get_kitti_label(label_dir, coord='camera'):
                 if coord == 'velodyne':
                     x = float(obj[13]) + 0.27
                     y = - float(obj[11])
-                    z = 1.65 - float(obj[12]) + h/2
-                    r = r - np.pi/2
+                    z = -0.08 - float(obj[12]) + (h/2)
+                    r = -float(obj[14]) - np.pi/2
                     if r < -np.pi:
                         r = r + np.pi * 2
                 label_obj = np.array([cls_, x, y, z, l, w, h, r]).reshape(1, 8)
@@ -46,6 +46,16 @@ def get_kitti_label(label_dir, coord='camera'):
             result = np.concatenate(result_list, axis=0)
         else: 
             result = None
+    return result
+
+def sort_label(label):
+    x = label[:, 1]
+    y = label[:, 2]
+    z = label[:, 3]
+    L = np.sqrt(x**2 + y**2 + z**2)
+    idx = np.argsort(L)
+    result = label[idx, :]
+    result = result[::-1, :]
     return result
 
 def test():
